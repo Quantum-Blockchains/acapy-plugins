@@ -26,7 +26,8 @@ python = "^3.12"
 acapy-agent = { git = "https://github.com/Quantum-Blockchains/acapy.git", rev = "kostia/qmc", optional = true }
 
 aiohttp = "^3.9.5"
-aries-askar = "~0.3.0"
+# aries-askar = "~0.3.0"
+aries-askar = { git = "https://github.com/Quantum-Blockchains/askar.git", rev = "kostia/qmc", subdirectory = "wrappers/python" }
 aiohttp-cors = "^0.7.0"
 marshmallow = "^3.20.1"
 jsonschema = "^4.23.0"
