@@ -8,7 +8,7 @@
       "name": "Run/Debug Plugin",
       "type": "python",
       "request": "launch",
-      "module": "acapy_agent",
+      "module": "aries_cloudagent",
       "justMyCode": false,
       "args": ["start", "--arg-file=${workspaceRoot}/docker/default.yml"]
     },

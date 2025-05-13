@@ -33,7 +33,7 @@ services:
       --wallet-name agency
       --wallet-key insecure
       --auto-provision
-      --log-level info
+      --log-level debug
       --debug-webhooks
       --no-ledger
       --plugin cheqd
@@ -84,20 +84,15 @@ services:
       - did_resolver
 
   did_registrar:
-    image: universalregistrar/uni-registrar-web:latest
-    ports:
-      - "9080:9080"
-    depends_on:
-      - driver-did-cheqd
-
-  driver-did-cheqd:
     image: ghcr.io/cheqd/did-registrar:production-latest
     ports:
-      - "9089:3000"
+      - target: 3000
+        published: 3000
+        mode: host
     restart: on-failure
     environment:
       - FEE_PAYER_TESTNET_MNEMONIC=${FEE_PAYER_TESTNET_MNEMONIC}
-      - FEE_PAYER_MAINNET_MNEMONIC=${FEE_PAYER_MAINNET_MNEMONIC}
+      - ENV FEE_PAYER_MAINNET_MNEMONIC=${FEE_PAYER_MAINNET_MNEMONIC}
 
   did_resolver:
     image: ghcr.io/cheqd/did-resolver:latest

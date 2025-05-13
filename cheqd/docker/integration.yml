@@ -1,6 +1,6 @@
 label: cheqd
 
-log-level: info
+log-level: DEBUG
 auto-provision: true
 
 # Admin

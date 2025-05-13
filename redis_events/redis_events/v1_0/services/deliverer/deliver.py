@@ -119,7 +119,9 @@ class Deliverer:
                                 {
                                     "service": {"url": endpoint},
                                     "headers": headers,
-                                    "payload": base64.urlsafe_b64encode(payload).decode(),
+                                    "payload": base64.urlsafe_b64encode(
+                                        payload
+                                    ).decode(),
                                     "retries": retries + 1,
                                 }
                             )
@@ -133,7 +135,9 @@ class Deliverer:
                         "trust_env": True,
                     }
                     client_session = aiohttp.ClientSession(**session_args)
-                    async with client_session.ws_connect(endpoint, headers=headers) as ws:
+                    async with client_session.ws_connect(
+                        endpoint, headers=headers
+                    ) as ws:
                         if isinstance(payload, bytes):
                             await ws.send_bytes(payload)
                         else:

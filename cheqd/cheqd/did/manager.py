@@ -10,33 +10,13 @@ from acapy_agent.wallet.did_method import DIDMethods
 from acapy_agent.wallet.did_parameters_validation import DIDParametersValidation
 from acapy_agent.wallet.error import WalletError
 from acapy_agent.wallet.key_type import ED25519
-from acapy_agent.wallet.util import b58_to_bytes, bytes_to_b64
+from acapy_agent.wallet.util import b58_to_bytes
 from aiohttp import web
 
-from .base import (
-    DidUpdateRequestOptions,
-    SubmitSignatureOptions,
-    DIDDocumentSchema,
-    DidActionState,
-)
-from .helpers import (
-    create_verification_keys,
-    create_did_verification_method,
-    VerificationMethods,
-    create_did_payload,
-    CheqdNetwork,
-)
-from ..did.base import (
-    BaseDIDManager,
-    CheqdDIDManagerError,
-    Secret,
-    DidDeactivateRequestOptions,
-    DidCreateRequestOptions,
-    Options,
-)
+from ..did.base import BaseDIDManager, CheqdDIDManagerError
 from ..did_method import CHEQD
 from ..resolver.resolver import CheqdDIDResolver
-from .registrar import DIDRegistrar
+from .registrar import CheqdDIDRegistrar
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 class CheqdDIDManager(BaseDIDManager):
     """DID manager implementation for did:cheqd."""
 
-    registrar: DIDRegistrar
+    registrar: CheqdDIDRegistrar
     resolver: CheqdDIDResolver
 
     def __init__(
@@ -55,12 +35,10 @@ class CheqdDIDManager(BaseDIDManager):
     ) -> None:
         """Initialize the Cheqd DID manager."""
         super().__init__(profile)
-        self.registrar = DIDRegistrar("cheqd", registrar_url)
+        self.registrar = CheqdDIDRegistrar(registrar_url)
         self.resolver = CheqdDIDResolver(resolver_url)
 
-    async def create(
-        self, did_doc: DIDDocumentSchema = None, options: dict = None
-    ) -> dict:
+    async def create(self, did_doc: dict = None, options: dict = None) -> dict:
         """Create a new Cheqd DID."""
         options = options or {}
 
@@ -70,7 +48,7 @@ class CheqdDIDManager(BaseDIDManager):
         if seed:
             seed = validate_seed(seed)
 
-        network = options.get("network") or CheqdNetwork.Testnet.value
+        network = options.get("network") or "testnet"
         key_type = ED25519
 
         did_validation = DIDParametersValidation(self.profile.inject(DIDMethods))
@@ -85,70 +63,57 @@ class CheqdDIDManager(BaseDIDManager):
                 key = await wallet.create_key(key_type, seed)
                 verkey = key.verkey
                 verkey_bytes = b58_to_bytes(verkey)
-                public_key_b64 = bytes_to_b64(verkey_bytes)
-                verification_method = (
-                    options.get("verification_method") or VerificationMethods.Ed255192020
+                public_key_hex = verkey_bytes.hex()
+
+                # generate payload
+                generate_res = await self.registrar.generate_did_doc(
+                    network, public_key_hex
                 )
+                if generate_res is None:
+                    raise CheqdDIDManagerError("Error constructing DID Document")
 
-                if did_doc is None:
-                    # generate payload
-                    verification_keys = create_verification_keys(public_key_b64, network)
-                    verification_methods = create_did_verification_method(
-                        [verification_method], [verification_keys]
-                    )
-                    did_document = create_did_payload(
-                        verification_methods, [verification_keys]
-                    )
-                else:
-                    did_document = did_doc
-
+                did_document = generate_res.get("didDoc")
                 did: str = did_document.get("id")
 
                 # request create did
                 create_request_res = await self.registrar.create(
-                    DidCreateRequestOptions(
-                        didDocument=did_document, options=Options(network=network)
-                    )
+                    {"didDocument": did_document, "network": network}
                 )
 
-                job_id = create_request_res.jobId
-                did_state = create_request_res.didState
-                if isinstance(did_state, DidActionState):
-                    if not did_state.signingRequest:
+                job_id: str = create_request_res.get("jobId")
+                did_state = create_request_res.get("didState")
+                if did_state.get("state") == "action":
+                    signing_requests: dict = did_state.get("signingRequest")
+                    if not signing_requests:
                         raise CheqdDIDManagerError(
                             "No signing requests available for create."
                         )
 
-                    signing_request = next(iter(did_state.signingRequest.values()), None)
-
-                    # Note: This assumes the DID create operation supports only one key
-                    kid = signing_request.kid
+                    # Note: This assumes did create operation supports only one did
+                    kid: str = signing_requests[0].get("kid")
                     await wallet.assign_kid_to_key(verkey, kid)
-
                     # sign all requests
                     signed_responses = await CheqdDIDManager.sign_requests(
-                        wallet, did_state.signingRequest
+                        wallet, signing_requests
                     )
                     # publish did
                     publish_did_res = await self.registrar.create(
-                        SubmitSignatureOptions(
-                            jobId=job_id,
-                            options=Options(
-                                network=network,
-                            ),
-                            secret=Secret(
-                                signingResponse=signed_responses,
-                            ),
-                        )
+                        {
+                            "jobId": job_id,
+                            "network": network,
+                            "secret": {
+                                "signingResponse": signed_responses,
+                            },
+                        }
                     )
-                    publish_did_state = publish_did_res.didState
-                    if publish_did_state.state != "finished":
+                    publish_did_state = publish_did_res.get("didState")
+                    if publish_did_state.get("state") != "finished":
                         raise CheqdDIDManagerError(
-                            f"Error registering DID {publish_did_state.reason}"
+                            f"Error registering DID {publish_did_state.get("reason")}"
                         )
                 else:
                     raise CheqdDIDManagerError(
-                        f"Error registering DID {did_state.reason}"
+                        f"Error registering DID {did_state.get("reason")}"
                     )
 
                 # create public did record
@@ -159,7 +124,7 @@ class CheqdDIDManager(BaseDIDManager):
         return {
             "did": did,
             "verkey": verkey,
-            "didDocument": publish_did_state.didDocument.dict(),
+            "didDocument": publish_did_state.get("didDocument"),
         }
 
     async def update(self, did: str, did_doc: dict, options: dict = None) -> dict:
@@ -180,18 +145,18 @@ class CheqdDIDManager(BaseDIDManager):
                 # TODO If registrar supports other operation,
                 #       take didDocumentOperation as input
                 update_request_res = await self.registrar.update(
-                    DidUpdateRequestOptions(
-                        did=did,
-                        didDocumentOperation=["setDidDocument"],
-                        didDocument=[did_doc],
-                    )
+                    {
+                        "did": did,
+                        "didDocumentOperation": ["setDidDocument"],
+                        "didDocument": [did_doc],
+                    }
                 )
 
-                job_id = update_request_res.jobId
-                did_state = update_request_res.didState
+                job_id: str = update_request_res.get("jobId")
+                did_state = update_request_res.get("didState")
 
-                if isinstance(did_state, DidActionState):
-                    signing_requests = did_state.signingRequest
+                if did_state.get("state") == "action":
+                    signing_requests: dict = did_state.get("signingRequest")
                     if not signing_requests:
                         raise Exception("No signing requests available for update.")
                     # sign all requests
@@ -201,24 +166,29 @@ class CheqdDIDManager(BaseDIDManager):
 
                     # submit signed update
                     publish_did_res = await self.registrar.update(
-                        SubmitSignatureOptions(
-                            jobId=job_id, secret=Secret(signingResponse=signed_responses)
-                        )
+                        {
+                            "jobId": job_id,
+                            "secret": {
+                                "signingResponse": signed_responses,
+                            },
+                        }
                     )
-                    publish_did_state = publish_did_res.didState
+                    publish_did_state = publish_did_res.get("didState")
 
-                    if publish_did_state.state != "finished":
+                    if publish_did_state.get("state") != "finished":
                         raise CheqdDIDManagerError(
                             f"Error publishing DID \
-                                update {publish_did_state.reason}"
+                                update {publish_did_state.get("description")}"
                         )
                 else:
-                    raise CheqdDIDManagerError(f"Error updating DID {did_state.reason}")
+                    raise CheqdDIDManagerError(
+                        f"Error updating DID {did_state.get("reason")}"
+                    )
             # TODO update new keys to wallet if necessary
             except Exception as ex:
                 raise ex
 
-        return {"did": did, "didDocument": publish_did_state.didDocument.dict()}
+        return {"did": did, "didDocument": publish_did_state.get("didDocument")}
 
     async def deactivate(self, did: str, options: dict = None) -> dict:
         """Deactivate a Cheqd DID."""
@@ -235,15 +205,13 @@ class CheqdDIDManager(BaseDIDManager):
                     raise DIDNotFound("DID is already deactivated or not found.")
 
                 # request deactivate did
-                deactivate_request_res = await self.registrar.deactivate(
-                    DidDeactivateRequestOptions(did=did)
-                )
+                deactivate_request_res = await self.registrar.deactivate({"did": did})
 
-                job_id: str = deactivate_request_res.jobId
-                did_state = deactivate_request_res.didState
+                job_id: str = deactivate_request_res.get("jobId")
+                did_state = deactivate_request_res.get("didState")
 
-                if isinstance(did_state, DidActionState):
-                    signing_requests = did_state.signingRequest
+                if did_state.get("state") == "action":
+                    signing_requests = did_state.get("signingRequest")
                     if not signing_requests:
                         raise WalletError("No signing requests available for update.")
                     # sign all requests
@@ -252,23 +220,23 @@ class CheqdDIDManager(BaseDIDManager):
                     )
                     # submit signed deactivate
                     publish_did_res = await self.registrar.deactivate(
-                        SubmitSignatureOptions(
-                            jobId=job_id,
-                            secret=Secret(
-                                signingResponse=signed_responses,
-                            ),
-                        )
+                        {
+                            "jobId": job_id,
+                            "secret": {
+                                "signingResponse": signed_responses,
+                            },
+                        }
                     )
 
-                    publish_did_state = publish_did_res.didState
+                    publish_did_state = publish_did_res.get("didState")
 
-                    if publish_did_state.state != "finished":
+                    if publish_did_state.get("state") != "finished":
                         raise WalletError(
                             f"Error publishing DID \
-                                deactivate {publish_did_state.reason}"
+                                deactivate {publish_did_state.get("description")}"
                         )
                 else:
-                    raise WalletError(f"Error deactivating DID {did_state.reason}")
+                    raise WalletError(f"Error deactivating DID {did_state.get("reason")}")
                 # update local did metadata
                 did_info = await wallet.get_local_did(did)
                 metadata = {**did_info.metadata, "deactivated": True}
@@ -277,6 +245,6 @@ class CheqdDIDManager(BaseDIDManager):
                 raise ex
         return {
             "did": did,
-            "didDocument": publish_did_state.didDocument.dict(),
-            "didDocumentMetadata": metadata,
+            "did_document": publish_did_state.get("didDocument"),
+            "did_document_metadata": metadata,
         }

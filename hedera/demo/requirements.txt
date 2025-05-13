@@ -1,5 +1,0 @@
-aiohttp
-prompt_toolkit~=2.0.10
-pygments
-qrcode[pil]
-requests

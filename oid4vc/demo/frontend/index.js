@@ -72,11 +72,6 @@ const presentationCache = new NodeCache({ stdTTL: 300, checkperiod: 400 });
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3001";
 const API_KEY = process.env.API_KEY;
-let jwtVcSupportedCredCreated = false;
-let sdJwtSupportedCredCreated = false;
-let jwtVcSupportedCredID = "";
-let sdJwtSupportedCredID = "";
-
 
 //    ###     ######     ###            ########  ##    ##
 //   ## ##   ##    ##   ## ##           ##     ##  ##  ##
@@ -173,18 +168,14 @@ async function issue_jwt_credential(req, res) {
     }),
   };
 
-  if (!jwtVcSupportedCredCreated){
-    events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Create Credential Request to: ${createCredentialSupportedUrl}`});
-    events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: createCredentialSupportedOptions});
-    const supportedCredentialData = await fetchApiData(
-      createCredentialSupportedUrl,
-      createCredentialSupportedOptions
-    );
-    jwtVcSupportedCredID = supportedCredentialData.supported_cred_id;
-    jwtVcSupportedCredCreated = true;
-  }
-  
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Create Credential Request to: ${createCredentialSupportedUrl}`});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: createCredentialSupportedOptions});
+  const supportedCredentialData = await fetchApiData(
+    createCredentialSupportedUrl,
+    createCredentialSupportedOptions
+  );
 
+  const supportedCredId = supportedCredentialData.supported_cred_id;
 
 
   // Create DID for issuance
@@ -204,7 +195,7 @@ async function issue_jwt_credential(req, res) {
   const { did } = didData;
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Created DID: ${did}`});
   logger.info(did);
-  logger.info(jwtVcSupportedCredID);
+  logger.info(supportedCredId);
 
 
   // Create Credential Exchange records
@@ -212,7 +203,7 @@ async function issue_jwt_credential(req, res) {
   const exchangeCreateOptions = {
     credential_subject: { id: req.body.registrationId, first_name: firstName, last_name: lastName, email },
     verification_method: did+"#0",
-    supported_cred_id: jwtVcSupportedCredID,
+    supported_cred_id: supportedCredId,
   };
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Generating Credential Exchange."});
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Credential Exchange Creation Request to: ${exchangeCreateUrl}`});
@@ -241,20 +232,10 @@ async function issue_jwt_credential(req, res) {
   // Generate QRCode and send it to the browser via HTMX events
   logger.info(JSON.stringify(offerResponse.data));
   logger.info(exchangeId);
-  
-  let qrcode;
-  if (credentialOffer.hasOwnProperty("credential_offer")) {
-    // credential offer is passed by value
-    qrcode = credentialOffer.credential_offer
-  } else {
-    // credential offer is passed by reference, and the wallet must dereference it using the
-    // /oid4vci/dereference-credential-offer endpoint
-    qrcode = credentialOffer.credential_offer_uri
-  }
-
+  const qrcode = credentialOffer.offer_uri;
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Sending offer to user: ${qrcode}`});
   events.emit(`issuance-${req.body.registrationId}`, {type: "qrcode", credentialOffer, exchangeId, qrcode});
-  exchangeCache.set(exchangeId, { exchangeId, credentialOffer, did, jwtVcSupportedCredID, registrationId: req.body.registrationId });
+  exchangeCache.set(exchangeId, { exchangeId, credentialOffer, did, supportedCredId, registrationId: req.body.registrationId });
 
   // Polling for the credential is an option at this stage, but we opt to just listen for the appropriate webhook instead
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Begin listening for credential to be issued."});
@@ -372,17 +353,14 @@ async function issue_sdjwt_credential(req, res) {
     }),
   };
 
-  if (!sdJwtSupportedCredCreated){
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Create Credential Request to: ${createCredentialSupportedUrl}`});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: createCredentialSupportedOptions});
+  const supportedCredentialData = await fetchApiData(
+    createCredentialSupportedUrl,
+    createCredentialSupportedOptions
+  );
 
-    events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Create Credential Request to: ${createCredentialSupportedUrl}`});
-    events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: createCredentialSupportedOptions});
-    const supportedCredentialData = await fetchApiData(
-      createCredentialSupportedUrl,
-      createCredentialSupportedOptions
-    );
-    sdJwtSupportedCredID = supportedCredentialData.supported_cred_id;
-    sdJwtSupportedCredCreated = true;
-  }
+  const supportedCredId = supportedCredentialData.supported_cred_id;
 
 
   // Create DID for issuance
@@ -402,7 +380,7 @@ async function issue_sdjwt_credential(req, res) {
   const { did } = didData;
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Created DID: ${did}`});
   logger.info(did);
-  logger.info(sdJwtSupportedCredID);
+  logger.info(supportedCredId);
 
 
   // Create Credential Exchange records
@@ -410,7 +388,7 @@ async function issue_sdjwt_credential(req, res) {
   const exchangeCreateOptions = {
     did: did,
     verification_method: did+"#0",
-    supported_cred_id: sdJwtSupportedCredID,
+    supported_cred_id: supportedCredId,
     credential_subject: {
       given_name: firstName,
       family_name: lastName,
@@ -453,20 +431,10 @@ async function issue_sdjwt_credential(req, res) {
   // Generate QRCode and send it to the browser via HTMX events
   logger.info(JSON.stringify(offerResponse.data));
   logger.info(exchangeId);
-
-  let qrcode;
-  if (credentialOffer.hasOwnProperty("credential_offer")) {
-    // credential offer is passed by value
-    qrcode = credentialOffer.credential_offer
-  } else {
-    // credential offer is passed by reference, and the wallet must dereference it using the
-    // /oid4vci/dereference-credential-offer endpoint
-    qrcode = credentialOffer.credential_offer_uri
-  }
-
+  const qrcode = credentialOffer.offer_uri;
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Sending offer to user: ${qrcode}`});
   events.emit(`issuance-${req.body.registrationId}`, {type: "qrcode", credentialOffer, exchangeId, qrcode});
-  exchangeCache.set(exchangeId, { exchangeId, credentialOffer, did, sdJwtSupportedCredID, registrationId: req.body.registrationId });
+  exchangeCache.set(exchangeId, { exchangeId, credentialOffer, did, supportedCredId, registrationId: req.body.registrationId });
 
   // Polling for the credential is an option at this stage, but we opt to just listen for the appropriate webhook instead
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Begin listening for credential to be issued."});

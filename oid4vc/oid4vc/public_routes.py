@@ -6,7 +6,6 @@ import logging
 import time
 import uuid
 from secrets import token_urlsafe
-from urllib.parse import quote
 from typing import Any, Dict, List, Optional
 
 from acapy_agent.admin.request_context import AdminRequestContext
@@ -29,7 +28,6 @@ from aiohttp_apispec import (
     docs,
     form_schema,
     match_info_schema,
-    querystring_schema,
     request_schema,
     response_schema,
 )
@@ -37,51 +35,23 @@ from aries_askar import Key, KeyAlg
 from base58 import b58decode
 from marshmallow import fields
 
-from oid4vc.dcql import DCQLQueryEvaluator
 from oid4vc.jwk import DID_JWK
 from oid4vc.jwt import jwt_sign, jwt_verify, key_material_for_kid
-from oid4vc.models.dcql_query import DCQLQuery
 from oid4vc.models.presentation import OID4VPPresentation
 from oid4vc.models.presentation_definition import OID4VPPresDef
 from oid4vc.models.request import OID4VPRequest
-from oid4vc.pex import (
-    PexVerifyResult,
-    PresentationExchangeEvaluator,
-    PresentationSubmission,
-)
+from oid4vc.pex import PresentationExchangeEvaluator, PresentationSubmission
 
 from .config import Config
 from .cred_processor import CredProcessorError, CredProcessors
 from .models.exchange import OID4VCIExchangeRecord
 from .models.supported_cred import SupportedCredential
 from .pop_result import PopResult
-from .routes import _parse_cred_offer, CredOfferQuerySchema, CredOfferResponseSchemaVal
 
 LOGGER = logging.getLogger(__name__)
 PRE_AUTHORIZED_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 NONCE_BYTES = 16
 EXPIRES_IN = 86400
-
-
-@docs(tags=["oid4vci"], summary="Dereference a credential offer.")
-@querystring_schema(CredOfferQuerySchema())
-@response_schema(CredOfferResponseSchemaVal(), 200)
-async def dereference_cred_offer(request: web.BaseRequest):
-    """Dereference a credential offer.
-
-    Reference URI is acquired from the /oid4vci/credential-offer-by-ref endpoint
-    (see routes.get_cred_offer_by_ref()).
-    """
-    context: AdminRequestContext = request["context"]
-    exchange_id = request.query["exchange_id"]
-
-    offer = await _parse_cred_offer(context, exchange_id)
-    return web.json_response(
-        {
-            "offer": offer,
-            "credential_offer": f"openid-credential-offer://?credential_offer={quote(json.dumps(offer))}",
-        }
-    )
 
 
 class CredentialIssuerMetadataSchema(OpenAPISchema):
@@ -101,7 +71,9 @@ class CredentialIssuerMetadataSchema(OpenAPISchema):
     )
     authorization_server = fields.Str(
         required=False,
-        metadata={"description": "The authorization server endpoint. Currently ignored."},
+        metadata={
+            "description": "The authorization server endpoint. Currently ignored."
+        },
     )
     batch_credential_endpoint = fields.Str(
         required=False,
@@ -156,8 +128,8 @@ async def token(request: web.Request):
     context: AdminRequestContext = request["context"]
     form = await request.post()
     LOGGER.debug(f"Token request: {form}")
-    if (form.get("grant_type")) != PRE_AUTHORIZED_CODE_GRANT_TYPE:
-        raise web.HTTPBadRequest(reason="grant_type not supported")
+    if (grant_type := form.get("grant_type")) != PRE_AUTHORIZED_CODE_GRANT_TYPE:
+        raise web.HTTPBadRequest(reason=f"grant_type {grant_type} not supported")
 
     pre_authorized_code = form.get("pre-authorized_code")
     if not pre_authorized_code or not isinstance(pre_authorized_code, str):
@@ -235,7 +207,9 @@ async def check_token(
     return result
 
 
-async def handle_proof_of_posession(profile: Profile, proof: Dict[str, Any], nonce: str):
+async def handle_proof_of_posession(
+    profile: Profile, proof: Dict[str, Any], nonce: str
+):
     """Handle proof of posession."""
     encoded_headers, encoded_payload, encoded_signature = proof["jwt"].split(".", 3)
     headers = b64_to_dict(encoded_headers)
@@ -341,7 +315,9 @@ async def issue_cred(request: web.Request):
     if "proof" not in body:
         raise web.HTTPBadRequest(reason=f"proof is required for {supported.format}")
 
-    pop = await handle_proof_of_posession(context.profile, body["proof"], ex_record.nonce)
+    pop = await handle_proof_of_posession(
+        context.profile, body["proof"], ex_record.nonce
+    )
     if not pop.verified:
         raise web.HTTPBadRequest(reason="Invalid proof")
 
@@ -456,8 +432,6 @@ async def get_request(request: web.Request):
     """Get an OID4VP Request token."""
     context: AdminRequestContext = request["context"]
     request_id = request.match_info["request_id"]
-    pres_def = None
-    dcql_query = None
 
     try:
         async with context.session() as session:
@@ -471,10 +445,7 @@ async def get_request(request: web.Request):
             pres.nonce = token_urlsafe(NONCE_BYTES)
             await pres.save(session=session, reason="Retrieved presentation request")
 
-            if record.pres_def_id:
-                pres_def = await OID4VPPresDef.retrieve_by_id(session, record.pres_def_id)
-            elif record.dcql_query_id:
-                dcql_query = await DCQLQuery.retrieve_by_id(session, record.dcql_query_id)
+            pres_def = await OID4VPPresDef.retrieve_by_id(session, record.pres_def_id)
             jwk = await retrieve_or_create_did_jwk(session)
 
     except StorageNotFoundError as err:
@@ -513,11 +484,8 @@ async def get_request(request: web.Request):
         "response_type": "vp_token",
         "response_mode": "direct_post",
         "scope": "vp_token",
+        "presentation_definition": pres_def.pres_def,
     }
-    if pres_def is not None:
-        payload["presentation_definition"] = pres_def.pres_def
-    if dcql_query is not None:
-        payload["dcql_query"] = dcql_query.record_value
 
     headers = {
         "kid": f"{jwk.did}#0",
@@ -550,7 +518,7 @@ class OID4VPPresentationIDMatchSchema(OpenAPISchema):
 class PostOID4VPResponseSchema(OpenAPISchema):
     """Schema for ..."""
 
-    presentation_submission = fields.Str(required=False, metadata={"description": ""})
+    presentation_submission = fields.Str(required=True, metadata={"description": ""})
 
     vp_token = fields.Str(
         required=True,
@@ -564,30 +532,7 @@ class PostOID4VPResponseSchema(OpenAPISchema):
     )
 
 
-async def verify_dcql_presentation(
-    profile: Profile,
-    vp_token: Dict[str, Any],
-    dcql_query_id: str,
-    presentation: OID4VPPresentation,
-):
-    """Verify a received presentation."""
-
-    LOGGER.debug("Got: %s", vp_token)
-
-    async with profile.session() as session:
-        pres_def_entry = await DCQLQuery.retrieve_by_id(
-            session,
-            dcql_query_id,
-        )
-
-        dcql_query = DCQLQuery.deserialize(pres_def_entry)
-
-    evaluator = DCQLQueryEvaluator.compile(dcql_query)
-    result = await evaluator.verify(profile, vp_token, presentation)
-    return result
-
-
-async def verify_pres_def_presentation(
+async def verify_presentation(
     profile: Profile,
     submission: PresentationSubmission,
     vp_token: str,
@@ -600,7 +545,9 @@ async def verify_pres_def_presentation(
 
     processors = profile.inject(CredProcessors)
     if not submission.descriptor_maps:
-        raise web.HTTPBadRequest(reason="Descriptor map of submission must not be empty")
+        raise web.HTTPBadRequest(
+            reason="Descriptor map of submission must not be empty"
+        )
 
     # TODO: Support longer descriptor map arrays
     if len(submission.descriptor_maps) != 1:
@@ -656,24 +603,13 @@ async def post_response(request: web.Request):
     try:
         assert isinstance(vp_token, str)
 
-        if record.pres_def_id:
-            verify_result = await verify_pres_def_presentation(
-                profile=context.profile,
-                submission=presentation_submission,
-                vp_token=vp_token,
-                pres_def_id=record.pres_def_id,
-                presentation=record,
-            )
-        elif record.dcql_query_id:
-            verify_result = await verify_dcql_presentation(
-                profile=context.profile,
-                vp_token=json.loads(vp_token),
-                dcql_query_id=record.dcql_query_id,
-                presentation=record,
-            )
-        else:
-            LOGGER.error("Record %s has neither pres_def_id or dcql_query_id", record)
-            raise web.HTTPInternalServerError(reason="Something went wrong")
+        verify_result = await verify_presentation(
+            profile=context.profile,
+            submission=presentation_submission,
+            vp_token=vp_token,
+            pres_def_id=record.pres_def_id,
+            presentation=record,
+        )
 
     except StorageNotFoundError as err:
         raise web.HTTPNotFound(reason=err.roll_up) from err
@@ -688,11 +624,7 @@ async def post_response(request: web.Request):
         record.errors = [verify_result.details]
 
     record.verified = verify_result.verified
-    record.matched_credentials = (
-        verify_result.descriptor_id_to_claims
-        if isinstance(verify_result, PexVerifyResult)
-        else verify_result.cred_query_id_to_claims
-    )
+    record.matched_credentials = verify_result.descriptor_id_to_claims
 
     async with context.session() as session:
         await record.save(
@@ -712,11 +644,6 @@ async def register(app: web.Application, multitenant: bool):
     subpath = "/tenant/{wallet_id}" if multitenant else ""
     app.add_routes(
         [
-            web.get(
-                f"{subpath}/oid4vci/dereference-credential-offer",
-                dereference_cred_offer,
-                allow_head=False,
-            ),
             web.get(
                 f"{subpath}/.well-known/openid-credential-issuer",
                 credential_issuer_metadata,

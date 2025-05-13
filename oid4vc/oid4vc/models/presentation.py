@@ -24,7 +24,7 @@ class OID4VPPresentation(BaseRecord):
     )
 
     RECORD_ID_NAME = "presentation_id"
-    TAG_NAMES = {"pres_def_id", "state", "request_id", "dcql_query_id"}
+    TAG_NAMES = {"pres_def_id", "state", "request_id"}
 
     class Meta:
         """OID4VP Presentation Metadata."""
@@ -36,8 +36,7 @@ class OID4VPPresentation(BaseRecord):
         *,
         presentation_id: Optional[str] = None,
         state: str,
-        pres_def_id: Optional[str] = None,
-        dcql_query_id: Optional[str] = None,
+        pres_def_id: str,
         errors: Optional[List[str]] = None,
         matched_credentials: Optional[Dict[str, Any]] = None,
         verified: Optional[bool] = None,
@@ -54,7 +53,6 @@ class OID4VPPresentation(BaseRecord):
         self.matched_credentials = matched_credentials
         self.verified = verified
         self.request_id = request_id
-        self.dcql_query_id = dcql_query_id
         self.nonce = nonce  # in request
 
     @property
@@ -102,16 +100,9 @@ class OID4VPPresentationSchema(BaseRecordSchema):
     )
 
     pres_def_id = fields.Str(
-        required=False,
+        required=True,
         metadata={
             "description": "Identifier used to identify presentation defintion",
-        },
-    )
-
-    dcql_query_id = fields.Str(
-        required=False,
-        metadata={
-            "description": "Identifier used to identify dcql query",
         },
     )
 

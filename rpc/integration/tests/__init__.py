@@ -60,16 +60,16 @@ class Agent:
 
     @unwrap_json_response
     @fail_if_not_ok("Create invitation failed")
-    def create_invitation(self, body: dict, **kwargs):
+    def create_invitation(self, **kwargs):
         """Create invitation."""
-        return post(self.url, "/out-of-band/create-invitation", params=kwargs, json=body)
+        return post(self.url, "/connections/create-invitation", params=kwargs)
 
     @unwrap_json_response
     @fail_if_not_ok("Receive invitation failed")
     def receive_invite(self, invite: dict, **kwargs):
         """Receive invitation."""
         return post(
-            self.url, "/out-of-band/receive-invitation", params=kwargs, json=invite
+            self.url, "/connections/receive-invitation", params=kwargs, json=invite
         )
 
     @unwrap_json_response
@@ -125,7 +125,9 @@ class Agent:
 
         return wrapped_get(self.url, path, **kwargs)
 
-    def post(self, path: str, return_json: bool = True, fail_with: str = None, **kwargs):
+    def post(
+        self, path: str, return_json: bool = True, fail_with: str = None, **kwargs
+    ):
         """Do post to agent endpoint."""
         wrapped_post = post
         if fail_with:

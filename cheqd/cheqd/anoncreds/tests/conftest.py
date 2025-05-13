@@ -7,9 +7,7 @@ from acapy_agent.utils.testing import create_test_profile
 from acapy_agent.wallet.did_method import DIDMethods
 from acapy_agent.wallet.key_type import KeyTypes
 
-from ...did.base import ResourceCreateRequestOptions, ResourceUpdateRequestOptions
 from ...did_method import CHEQD
-from ..registry import PublishResourceResponse
 
 
 @pytest.fixture
@@ -20,8 +18,8 @@ def mock_profile():
 @pytest.fixture
 def mock_resolver():
     mock_resolver = AsyncMock()
-    mock_resolver.dereference_with_metadata.return_value = MagicMock()
-    mock_resolver.dereference_with_metadata.return_value.resource = {
+    mock_resolver.resolve_resource.return_value = MagicMock()
+    mock_resolver.resolve_resource.return_value.resource = {
         "attrNames": "MOCK_ATTR_NAMES",
         "name": "MOCK_NAME",
         "version": "MOCK_VERSION",
@@ -34,7 +32,7 @@ def mock_resolver():
         "revocationList": [0, 1, 0],
         "currentAccumulator": "MOCK_ACCUMULATOR",
     }
-    mock_resolver.dereference_with_metadata.return_value.metadata = {
+    mock_resolver.resolve_resource.return_value.metadata = {
         "MOCK_METADATA_KEY": "MOCK_METADATA_VALUE"
     }
 
@@ -56,18 +54,11 @@ def mock_schema():
 
 @pytest.fixture
 def mock_create_and_publish_resource():
-    return PublishResourceResponse(
-        did_url="MOCK_ISSUER_ID/resources/MOCK_RESOURCE_ID",
-        content="MOCK_VALUE",
-    )
-
-
-@pytest.fixture
-def mock_update_and_publish_resource():
-    return PublishResourceResponse(
-        did_url="MOCK_ISSUER_ID/resources/MOCK_RESOURCE_ID",
-        content="MOCK_VALUE",
-    )
+    return {
+        "jobId": "MOCK_JOB_ID",
+        "resource": {"id": "MOCK_RESOURCE_ID"},
+        "id": "MOCK_ID",
+    }
 
 
 @pytest.fixture
@@ -139,17 +130,3 @@ async def mock_profile_for_manager():
     profile.context.injector.bind_instance(BaseCache, InMemoryCache())
 
     return profile
-
-
-@pytest.fixture
-def mock_resource_create_options():
-    return ResourceCreateRequestOptions(
-        did="MOCK_VALUE", content="MOCK_VALUE", name="MOCK_VALUE", type="MOCK_VALUE"
-    )
-
-
-@pytest.fixture
-def mock_resource_update_options():
-    return ResourceUpdateRequestOptions(
-        did="MOCK_VALUE", content=["MOCK_VALUE"], name="MOCK_VALUE", type="MOCK_VALUE"
-    )
